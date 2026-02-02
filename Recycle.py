@@ -19,7 +19,7 @@ turn_end_speed = 450  # 程序转弯结束速度
 end_angle = 75  # 转向结束角度
 target_altitude = 81000  # 目标轨道高度
 terminal = False  # 末制导开始标志
-terminal_dist = 6000  # 末制导起始距离
+terminal_dist = 5000  # 末制导起始距离
 start_angle = -1  # 用于记录开始末制导时速度向量与目标向量的夹角
 factor = 1.1  # 着陆点火高度因子，调小以更早进行点火，调大反之
 landing = False  # 动力着陆开始标志
@@ -268,7 +268,6 @@ while vessel.position(target_frame)[0] > 60000:
     output()
 ctrl.rcs = False  # 关闭反应控制系统
 vessel.auto_pilot.disengage()  # 关闭自动驾驶仪
-
 heading_pid = PID(kp=-0.1, ki=0, kd=-0.05)
 pitch_pid = PID(kp=-0.2, ki=-0.02, kd=-0.1)
 roll_pid = PID(kp=-0.02, ki=0, kd=-0.01)
@@ -277,7 +276,7 @@ pitch_rate_pid = PID(kp=0.2, ki=0.02, kd=0)  # 末制导法向导引内环PID，
 ut = conn.space_center.ut
 target_heading = 90
 bias = 0  # 再入制导目标点向后偏置，用于调整末端弹道
-K = 2  # 横向导引修正比例
+K = 1.5  # 横向导引修正比例
 while vessel.position(target_frame)[2] > 50:  # 再入制导
     sleep(0.02)
     dt = conn.space_center.ut - ut  # 游戏内时间间隔
@@ -327,12 +326,13 @@ while vessel.position(target_frame)[2] > 50:  # 再入制导
 landing = True
 ctrl.throttle = ref_throttle
 speed_pid = PID(kp=0.1, ki=0, kd=0)
-heading_correct_pid = PID(kp=0.5, ki=0, kd=0.5)
+heading_correct_pid = PID(kp=0.2, ki=0, kd=0.1)
 heading_pid = PID(kp=-0.05, ki=0, kd=-0.02)
 pitch_pid = PID(kp=-0.05, ki=-0.01, kd=-0.03)
 roll_pid = PID(kp=-0.002, ki=0, kd=-0.005)
 ut = conn.space_center.ut
 target_roll = 0
+err_lateral = 0
 bias = 0  # 水平距离偏置，用于纵向落点修正
 cur_pos = vessel.position(target_frame)
 while target_frame_velocity()[0] < -0.5 and cur_pos[0] > 0.5:  # 动力着陆制导
@@ -357,8 +357,9 @@ while target_frame_velocity()[0] < -0.5 and cur_pos[0] > 0.5:  # 动力着陆制
     if not gear_flag and H < 500:
         gear_flag = True
         ctrl.gear = True
-    if not dir_mode and vectors_angle((1, 0, 0),
-                                      conn.space_center.transform_direction((0, 1, 0), vessel_frame, target_frame)) < 5:
+    if not dir_mode and (vectors_angle((1, 0, 0), conn.space_center.transform_direction(
+            (0, 1, 0), vessel_frame, target_frame)) < 5 or vectors_angle(
+            target_frame_velocity(), (-1, 0, 0)) < 5 or target_frame_velocity()[0] > -5):
         dir_mode = True
         ctrl.yaw = 0
         ctrl.roll = 0
@@ -366,14 +367,15 @@ while target_frame_velocity()[0] < -0.5 and cur_pos[0] > 0.5:  # 动力着陆制
         if abs(vessel_vel_2D()[1]) < 0.5:
             target_pitch = 90
         else:
-            target_pitch = 90 - limit(vessel_vel_2D()[1] * 2, -3, 3)
-    if D > 50:
+            target_pitch = 90 - limit(vessel_vel_2D()[1] * 2, -5, 5)
+    if not dir_mode and D > 50:
         target_pitch = 90 - math.asin(limit(horizontal_speed ** 2 / (2 * (D + bias) * math.cos(
             (pos_dir - retrograde) / 180 * math.pi) * 0.7 * acc), -1, 1)) / math.pi * 180
     err_pitch = pitch - target_pitch
     ctrl.pitch = limit(pitch_pid.update(err_pitch, dt), -0.5, 0.5)  # 主减速段法向导引
     if vessel.flight(target_frame).pitch < 85:  # 主减速段横向导引与滚转控制
-        err_lateral = math.sin((pos_dir - retrograde) / 180 * math.pi) * D
+        if vessel.flight(srf_frame).speed < 100:
+            err_lateral = math.sin((pos_dir - retrograde) / 180 * math.pi) * D
         target_heading = retrograde + heading_correct_pid.update(err_lateral, dt)
         err_heading = vessel.flight(target_frame).heading - target_heading
         ctrl.yaw = limit(heading_pid.update(err_heading, dt), -0.25, 0.25)
@@ -396,3 +398,4 @@ sleep(3)
 ctrl.rcs = False
 ctrl.sas = False
 system('pause')
+# dir阶段停止滚转控制，航向控制恢复至90，关闭一台发动机着陆
