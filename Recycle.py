@@ -221,6 +221,7 @@ while True:
         vessel.auto_pilot.target_pitch_and_heading(90 - turn_angle, 90)
     elif vessel.orbit.apoapsis_altitude > target_altitude:  # 发动机一次关机
         ctrl.throttle = 0
+        ctrl.toggle_action_group(2)  # 关闭中心引擎
         ctrl.rcs = True  # 开启反应控制系统
         break
 
@@ -277,28 +278,28 @@ ut = conn.space_center.ut
 target_heading = 90
 bias = 0  # 再入制导目标点向后偏置，用于调整末端弹道
 K = 1.5  # 横向导引修正比例
-while vessel.position(target_frame)[2] > 50:  # 再入制导
+while True:  # 再入制导
     sleep(0.02)
     dt = conn.space_center.ut - ut  # 游戏内时间间隔
     if dt < 0.005:
         continue
     ut = conn.space_center.ut
     D = math.sqrt(vessel.position(target_frame)[1] ** 2 + vessel.position(target_frame)[2] ** 2)  # 水平距离
-    if D > 500:  # 水平距离过小时锁定航向和滚转
-        target_heading = 90 - math.asin(
-            vessel.position(target_frame)[1] / vessel.position(target_frame)[2]) * 180 / math.pi
-        target_roll = 0
+    acc = vessel.available_thrust / vessel.mass  # 航天器当前最大加速度
+    pos = (
+        vessel.position(target_frame)[0],
+        vessel.position(target_frame)[1] + bias * vessel.position(target_frame)[1] / D,
+        vessel.position(target_frame)[2] + bias * vessel.position(target_frame)[2] / D)  # 纵向导引瞄准点
+    target_dir = math.acos(vessel.position(target_frame)[1] / D) * 180 / math.pi  # 设定航向为目标方向
+    target_heading = target_dir + (target_dir - 90) * K
     if D > 2000:
-        target_heading = target_heading + (target_heading - 90) * K
         target_roll = (90 - vessel.flight(target_frame).heading) * K
+    else:  # 水平距离过小时锁定滚转
+        target_roll = 0
     err_heading = vessel.flight(target_frame).heading - target_heading
     err_roll = vessel.flight(target_frame).roll - target_roll
     ctrl.yaw = limit(heading_pid.update(err_heading, dt), -0.5, 0.5)  # 横向导引
     ctrl.roll = limit(roll_pid.update(err_roll, dt), -0.25, 0.25)
-    pos = (
-        vessel.position(target_frame)[0],
-        vessel.position(target_frame)[1] + bias * vessel.position(target_frame)[1] / D,
-        vessel.position(target_frame)[2] + bias * vessel.position(target_frame)[2] / D)
     v_angle = vertical_angle(pos, target_frame_velocity())
     if not terminal:
         target_pitch = vessel.flight(target_frame).pitch - (20 - aoa())  # 固定攻角导引
@@ -318,7 +319,6 @@ while vessel.position(target_frame)[2] > 50:  # 再入制导
                                                                                     -5, 5)
         ctrl.pitch = pitch_rate_pid.update(err_i, dt)  # 末端法向导引
         output(True, err_heading, err_pitch, err_roll, v_angle, terminal, err_e, err_i)
-        acc = vessel.available_thrust / vessel.mass  # 航天器当前最大加速度
         if vessel.position(target_frame)[0] < vessel.flight(srf_frame).speed ** 2 / (2 * (acc * factor - g)):
             break
 
@@ -326,7 +326,7 @@ while vessel.position(target_frame)[2] > 50:  # 再入制导
 landing = True
 ctrl.throttle = ref_throttle
 speed_pid = PID(kp=0.1, ki=0, kd=0)
-heading_correct_pid = PID(kp=0.2, ki=0, kd=0.1)
+heading_correct_pid = PID(kp=0.3, ki=0, kd=0.3)
 heading_pid = PID(kp=-0.05, ki=0, kd=-0.02)
 pitch_pid = PID(kp=-0.05, ki=-0.01, kd=-0.03)
 roll_pid = PID(kp=-0.002, ki=0, kd=-0.005)
@@ -359,24 +359,26 @@ while target_frame_velocity()[0] < -0.5 and cur_pos[0] > 0.5:  # 动力着陆制
         ctrl.gear = True
     if not dir_mode and (vectors_angle((1, 0, 0), conn.space_center.transform_direction(
             (0, 1, 0), vessel_frame, target_frame)) < 5 or vectors_angle(
-            target_frame_velocity(), (-1, 0, 0)) < 5 or target_frame_velocity()[0] > -5):
+            target_frame_velocity(), (-1, 0, 0)) < 5 or vessel_vel_2D()[1] < 5):
         dir_mode = True
-        ctrl.yaw = 0
-        ctrl.roll = 0
     elif dir_mode:
-        if abs(vessel_vel_2D()[1]) < 0.5:
+        ctrl.roll = 0
+        if abs(vessel_vel_2D()[1]) < 1:
             target_pitch = 90
         else:
-            target_pitch = 90 - limit(vessel_vel_2D()[1] * 2, -5, 5)
-    if not dir_mode and D > 50:
+            target_pitch = 90 - limit(vessel_vel_2D()[1] * 2, -10, 10)
+    if not dir_mode and vessel.position(target_frame)[2] > 50:  # 纵向小于50m锁定俯仰角直至稳定指向模式
         target_pitch = 90 - math.asin(limit(horizontal_speed ** 2 / (2 * (D + bias) * math.cos(
             (pos_dir - retrograde) / 180 * math.pi) * 0.7 * acc), -1, 1)) / math.pi * 180
     err_pitch = pitch - target_pitch
     ctrl.pitch = limit(pitch_pid.update(err_pitch, dt), -0.5, 0.5)  # 主减速段法向导引
-    if vessel.flight(target_frame).pitch < 85:  # 主减速段横向导引与滚转控制
-        if vessel.flight(srf_frame).speed < 100:
-            err_lateral = math.sin((pos_dir - retrograde) / 180 * math.pi) * D
-        target_heading = retrograde + heading_correct_pid.update(err_lateral, dt)
+    target_heading = retrograde
+    if vessel.flight(target_frame).pitch < 80:  # 主减速段横向导引
+        err_lateral = math.sin((pos_dir - retrograde) / 180 * math.pi) * D
+        if vessel.flight(srf_frame).speed > 150:
+            target_heading = target_heading + heading_correct_pid.update(-err_lateral, dt)
+        elif vessel.flight(srf_frame).speed < 100:
+            target_heading = target_heading + heading_correct_pid.update(err_lateral, dt)
         err_heading = vessel.flight(target_frame).heading - target_heading
         ctrl.yaw = limit(heading_pid.update(err_heading, dt), -0.25, 0.25)
         err_roll = vessel.flight(target_frame).roll - target_roll
@@ -384,13 +386,12 @@ while target_frame_velocity()[0] < -0.5 and cur_pos[0] > 0.5:  # 动力着陆制
     target_speed = math.sqrt(H * 2 * (acc * ref_throttle - g))
     err_speed = -target_frame_velocity()[0] - target_speed + 1
     ctrl.throttle = limit(speed_pid.update(err_speed, dt) + ref_throttle, 0.75, 1)
-    output(True, err_heading, err_pitch, err_roll, 0, terminal, 0, 0, landing, err_lateral, target_heading, err_speed)
+    output(True, err_heading, err_pitch, 0, 0, terminal, 0, 0, landing, err_lateral, target_heading, err_speed)
 ctrl.throttle = 0
 ctrl.pitch = 0
 ctrl.yaw = 0
-ctrl.roll = 0
-ctrl.toggle_action_group(2)
 ctrl.toggle_action_group(3)
+ctrl.toggle_action_group(4)
 ctrl.rcs = True
 ctrl.sas = True
 ctrl.sas_mode = ctrl.sas_mode.stability_assist
@@ -398,4 +399,3 @@ sleep(3)
 ctrl.rcs = False
 ctrl.sas = False
 system('pause')
-# dir阶段停止滚转控制，航向控制恢复至90，关闭一台发动机着陆
