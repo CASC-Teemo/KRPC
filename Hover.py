@@ -58,7 +58,7 @@ def output(reentry=False, err_h=0, err_p=0, err_r=0, err_v=0, terminal=False, er
     print('攻角：%.1f' % aoa(), '°')
     if reentry:
         print()
-        print('航向角误差：%.1f' % err_h, '°')
+        print('偏航角误差：%.1f' % err_h, '°')
         print('俯仰角误差：%.1f' % err_p, '°')
         print('滚转角误差：%.1f' % err_r, '°')
         print('垂直角偏差：%.1f' % err_v, '°')
@@ -235,7 +235,7 @@ pitch_pid = PID(kp=0.05, ki=0, kd=0.2)
 yaw_pid = PID(kp=0.05, ki=0, kd=0.2)
 roll_pid = PID(kp=-0.01, ki=0, kd=-0.02)
 ut = conn.space_center.ut
-target_pos = (-78, -118, 613)
+target_pos = (10, 0, 0)
 target_pitch = 90
 target_yaw = 0
 target_roll = 90
@@ -252,8 +252,8 @@ while True:
     target_east_speed = limit((target_pos[2] - vessel.position(target_frame)[2]) / 2, -5, 5)
     err_east_speed = target_frame_velocity()[2] - target_east_speed
     target_pitch = limit(east_speed_pid.update(err_east_speed, dt), -15, 15) + 90
-    err_pitch_rate = target_pitch - pitch
-    ctrl.pitch = pitch_pid.update(err_pitch_rate, dt)
+    err_pitch = target_pitch - pitch
+    ctrl.pitch = pitch_pid.update(err_pitch, dt)
     target_north_speed = limit((target_pos[1] - vessel.position(target_frame)[1]) / 2, -5, 5)
     err_north_speed = target_frame_velocity()[1] - target_north_speed
     target_yaw = limit(east_speed_pid.update(err_north_speed, dt), -15, 15)
@@ -263,3 +263,4 @@ while True:
     ctrl.roll = roll_pid.update(err_roll, dt)
     err_v = target_pos[0] - vessel.position(target_frame)[0]
     ctrl.throttle = limit(throttle_pid.update(err_v, dt), -3, 3)
+    output(True, err_yaw, err_pitch, err_roll)
