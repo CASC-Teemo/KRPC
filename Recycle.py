@@ -10,9 +10,10 @@ vessel = conn.space_center.active_vessel  # 激活航天器控制
 print('连接成功！')
 print('任务名：', vessel.name)
 ctrl = vessel.control
+t_up_v = (0, 1, 0)
 g = vessel.orbit.body.surface_gravity  # 海平面重力加速度
 srf_frame = vessel.orbit.body.reference_frame  # 质心固连参考系
-vessel_frame = vessel.reference_frame  # 本体参考系
+vessel_frame = vessel.reference_frame  # 本体参考系，设箭体朝向为前，xyz对应右前下
 R = vessel.orbit.body.equatorial_radius  # 地球半径
 turn_start_speed = 50  # 程序转弯起始速度
 turn_end_speed = 450  # 程序转弯结束速度
@@ -113,6 +114,48 @@ def vectors_angle(u, v):
     um = magnitude(u)
     vm = magnitude(v)
     return math.acos(dp / (um * vm)) * (180 / math.pi)
+
+
+# 箭体垂直时俯仰角，垂直向上为90°，偏东逐渐减小
+def pitch_angle():
+    t_up = (1, 0, 0)  # 着陆点坐标系天顶方向
+    t_up_v = conn.space_center.transform_direction(t_up, target_frame, vessel_frame)  # 使用本体系表示着陆点坐标系天顶方向
+    v_right = (1, 0, 0)  # 本体系右方
+    v_down = (0, 0, 1)  # 本体系下方
+    pitch_hor = cross_product(v_right, t_up_v)
+    angle = vectors_angle(pitch_hor, v_down)
+    if pitch_hor[1] < 0:
+        return angle + 90
+    else:
+        return -angle + 90
+
+
+# 箭体垂直时偏航角，垂直向上时为0，偏南(本体系向右)为正
+def yaw_angle():
+    t_up = (1, 0, 0)  # 着陆点坐标系天顶方向
+    v_forward = (0, 1, 0)  # 本体系前方
+    t_up_v = conn.space_center.transform_direction(t_up, target_frame, vessel_frame)
+    proj_xoy = (t_up_v[0], t_up_v[1], 0)
+    angle = vectors_angle(proj_xoy, v_forward)
+    cross = cross_product(v_forward, proj_xoy)
+    if cross[2] < 0:
+        return -angle
+    else:
+        return angle
+
+
+# 箭体垂直时滚转角，本体系下方向东为90°(基准)，向北为0°
+def roll_angle():
+    t_east = (0, 0, 1)
+    v_right = (1, 0, 0)
+    v_right_t = conn.space_center.transform_direction(v_right, vessel_frame, target_frame)
+    proj_horizontal = (0, v_right_t[1], v_right_t[2])
+    angle = vectors_angle(proj_horizontal, t_east)
+    cross = cross_product(t_east, proj_horizontal)
+    if cross[0] > 0:
+        return angle
+    else:
+        return -angle
 
 
 # 二维矢量旋转
@@ -326,10 +369,10 @@ while True:  # 再入制导
 landing = True
 ctrl.throttle = ref_throttle
 speed_pid = PID(kp=0.1, ki=0, kd=0)
-heading_correct_pid = PID(kp=0.3, ki=0, kd=0.3)
+heading_correct_pid = PID(kp=0.2, ki=0, kd=0.4)
 heading_pid = PID(kp=-0.05, ki=0, kd=-0.02)
 pitch_pid = PID(kp=-0.05, ki=-0.01, kd=-0.03)
-roll_pid = PID(kp=-0.002, ki=0, kd=-0.005)
+roll_pid = PID(kp=-0.002, ki=0, kd=-0.01)
 ut = conn.space_center.ut
 target_roll = 0
 err_lateral = 0
@@ -358,11 +401,11 @@ while target_frame_velocity()[0] < -0.5 and cur_pos[0] > 0.5:  # 动力着陆制
         gear_flag = True
         ctrl.gear = True
     if not dir_mode and (vectors_angle((1, 0, 0), conn.space_center.transform_direction(
-            (0, 1, 0), vessel_frame, target_frame)) < 5 or vectors_angle(
-            target_frame_velocity(), (-1, 0, 0)) < 5 or vessel_vel_2D()[1] < 5):
+            (0, 1, 0), vessel_frame, target_frame)) < 5 or vectors_angle(target_frame_velocity(), (
+            -1, 0, 0)) < 5 or vessel_vel_2D()[1] < 5 or target_frame_velocity()[0] > -40):
         dir_mode = True
+        target_roll = 90
     elif dir_mode:
-        ctrl.roll = 0
         if abs(vessel_vel_2D()[1]) < 1:
             target_pitch = 90
         else:
@@ -371,18 +414,22 @@ while target_frame_velocity()[0] < -0.5 and cur_pos[0] > 0.5:  # 动力着陆制
         target_pitch = 90 - math.asin(limit(horizontal_speed ** 2 / (2 * (D + bias) * math.cos(
             (pos_dir - retrograde) / 180 * math.pi) * 0.7 * acc), -1, 1)) / math.pi * 180
     err_pitch = pitch - target_pitch
-    ctrl.pitch = limit(pitch_pid.update(err_pitch, dt), -0.5, 0.5)  # 主减速段法向导引
+    ctrl.pitch = limit(pitch_pid.update(err_pitch, dt), -1, 1)  # 主减速段法向导引
     target_heading = retrograde
     if vessel.flight(target_frame).pitch < 80:  # 主减速段横向导引
         err_lateral = math.sin((pos_dir - retrograde) / 180 * math.pi) * D
-        if vessel.flight(srf_frame).speed > 150:
-            target_heading = target_heading + heading_correct_pid.update(-err_lateral, dt)
-        elif vessel.flight(srf_frame).speed < 100:
+        if vessel.flight(srf_frame).speed < 100:
             target_heading = target_heading + heading_correct_pid.update(err_lateral, dt)
-        err_heading = vessel.flight(target_frame).heading - target_heading
-        ctrl.yaw = limit(heading_pid.update(err_heading, dt), -0.25, 0.25)
-        err_roll = vessel.flight(target_frame).roll - target_roll
-        ctrl.roll = limit(roll_pid.update(err_roll, dt), -0.1, 0.1)
+        else:
+            target_heading = target_heading + heading_correct_pid.update(-err_lateral, dt)
+        if dir_mode:
+            err_heading = yaw_angle()
+            err_roll = target_roll - roll_angle()
+        else:
+            err_heading = vessel.flight(target_frame).heading - target_heading
+            err_roll = vessel.flight(target_frame).roll - target_roll
+        ctrl.yaw = limit(heading_pid.update(err_heading, dt), -1, 1)
+        ctrl.roll = limit(roll_pid.update(err_roll, dt), -0.2, 0.2)
     target_speed = math.sqrt(H * 2 * (acc * ref_throttle - g))
     err_speed = -target_frame_velocity()[0] - target_speed + 1
     ctrl.throttle = limit(speed_pid.update(err_speed, dt) + ref_throttle, 0.75, 1)
