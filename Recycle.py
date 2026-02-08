@@ -376,7 +376,7 @@ roll_pid = PID(kp=-0.002, ki=0, kd=-0.01)
 ut = conn.space_center.ut
 target_roll = 0
 err_lateral = 0
-bias = 0  # 水平距离偏置，用于纵向落点修正
+bias = 0  # 纵向水平距离向后偏置，用于法向导引补偿
 cur_pos = vessel.position(target_frame)
 while target_frame_velocity()[0] < -0.5 and cur_pos[0] > 0.5:  # 动力着陆制导
     pre_pos = cur_pos
@@ -391,7 +391,7 @@ while target_frame_velocity()[0] < -0.5 and cur_pos[0] > 0.5:  # 动力着陆制
     ds = math.sqrt((pre_pos[1] - cur_pos[1]) ** 2 + (pre_pos[2] - cur_pos[2]) ** 2)
     horizontal_speed = math.sqrt(target_frame_velocity()[1] ** 2 + target_frame_velocity()[2] ** 2)
     retrograde = math.acos(limit((pre_pos[1] - cur_pos[1]) / ds, -1, 1)) / math.pi * 180  # 速度反向
-    pos_dir = math.acos(limit(-cur_pos[1] / D, -1, 1)) / math.pi * 180  # 目标位置航向
+    pos_dir = math.acos(limit(cur_pos[1] / D, -1, 1)) / math.pi * 180  # 目标位置航向
     acc = vessel.available_thrust / vessel.mass
     if conn.space_center.transform_direction((0, 100, 0), vessel_frame, target_frame)[2] < 0:
         pitch = 180 - vessel.flight(target_frame).pitch
@@ -418,10 +418,8 @@ while target_frame_velocity()[0] < -0.5 and cur_pos[0] > 0.5:  # 动力着陆制
     target_heading = retrograde
     if vessel.flight(target_frame).pitch < 80:  # 主减速段横向导引
         err_lateral = math.sin((pos_dir - retrograde) / 180 * math.pi) * D
-        if vessel.flight(srf_frame).speed < 100:
-            target_heading = target_heading + heading_correct_pid.update(err_lateral, dt)
-        else:
-            target_heading = target_heading + heading_correct_pid.update(-err_lateral, dt)
+        if vessel.flight(srf_frame).speed < 200:
+            target_heading = target_heading - heading_correct_pid.update(err_lateral, dt)
         if dir_mode:
             err_heading = yaw_angle()
             err_roll = target_roll - roll_angle()
