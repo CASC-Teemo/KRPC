@@ -38,6 +38,7 @@ temp2 = conn.space_center.ReferenceFrame.create_relative(temp1, rotation=(
 target_frame = conn.space_center.ReferenceFrame.create_relative(temp2, position=(target_height, 0, 0))
 
 
+# 调试输出
 def output(reentry=False, err_h=0, err_p=0, err_r=0, err_v=0, terminal=False, err_e=0, err_i=0, landing=False,
            err_lateral=0, err_heading=0, err_speed=0):
     system('cls')
@@ -240,7 +241,7 @@ class PID:
 
 
 sleep(3)
-for i in range(5):  # 点火倒计时
+for i in range(5):
     system('cls')
     print('发射倒计时：')
     print(5 - i)
@@ -288,7 +289,7 @@ while True:  # 返场制导
     output()
     v = vessel.flight(srf_frame).vertical_speed
     t = (v + math.sqrt(v * v + 2 * g * vessel.flight().mean_altitude)) / g  # 自由落体至地面所需时间
-    predict_dis = vessel.flight(srf_frame).horizontal_speed * t
+    predict_dis = vessel.flight(srf_frame).horizontal_speed * t  # 距离预测
     if target_frame_velocity()[2] > 0:  # 航天器向东运动
         predict_dis = - predict_dis  # 向东为负，向西为正
     if dis(vessel.flight().latitude, vessel.flight().longitude, target_latitude, target_longitude) < (
@@ -316,15 +317,14 @@ pitch_pid = PID(kp=-0.2, ki=-0.02, kd=-0.1)
 roll_pid = PID(kp=-0.02, ki=0, kd=-0.01)
 target_angle_pid = PID(kp=-0.2, ki=-0.05, kd=-0.2)  # 末制导法向导引外环PID，控制速度方向
 pitch_rate_pid = PID(kp=0.2, ki=0.02, kd=0)  # 末制导法向导引内环PID，控制俯仰角速度
-ut = conn.space_center.ut
+ut = conn.space_center.ut  # 时刻
 target_heading = 90
-bias = 0  # 再入制导目标点向后偏置，用于调整末端弹道
-K = 1.5  # 横向导引修正比例
+K = 1.5  # 航向偏置比例
 while True:  # 再入制导
     sleep(0.02)
-    dt = conn.space_center.ut - ut  # 游戏内时间间隔
+    dt = conn.space_center.ut - ut  # 时间间隔
     if dt < 0.005:
-        continue
+        continue  # 物理帧未刷新跳过
     ut = conn.space_center.ut
     D = math.sqrt(vessel.position(target_frame)[1] ** 2 + vessel.position(target_frame)[2] ** 2)  # 水平距离
     horizontal_speed = math.sqrt(target_frame_velocity()[1] ** 2 + target_frame_velocity()[2] ** 2)  # 水平速度
@@ -332,8 +332,8 @@ while True:  # 再入制导
     acc = vessel.available_thrust / vessel.mass  # 航天器当前最大加速度
     pos = (
         vessel.position(target_frame)[0],
-        vessel.position(target_frame)[1] + bias * vessel.position(target_frame)[1] / D,
-        vessel.position(target_frame)[2] + bias * vessel.position(target_frame)[2] / D)  # 纵向导引瞄准点
+        vessel.position(target_frame)[1] * vessel.position(target_frame)[1] / D,
+        vessel.position(target_frame)[2] * vessel.position(target_frame)[2] / D)  # 着陆点
     target_dir = math.acos((vessel.position(target_frame)[1] - 30) / D) * 180 / math.pi  # 目标方向
     target_heading = target_dir + (target_dir - 90) * K  # 航向偏置导引
     if D > 2000:
@@ -344,7 +344,7 @@ while True:  # 再入制导
     err_roll = vessel.flight(target_frame).roll - target_roll
     ctrl.yaw = limit(heading_pid.update(err_heading, dt), -0.5, 0.5)
     ctrl.roll = limit(roll_pid.update(err_roll, dt), -0.25, 0.25)
-    v_angle = vertical_angle(pos, target_frame_velocity())
+    v_angle = vertical_angle(pos, target_frame_velocity())  # 目标矢量与速度矢量的夹角
     if not terminal:
         target_pitch = vessel.flight(target_frame).pitch - (20 - aoa())  # 固定攻角导引
         err_pitch = vessel.flight(target_frame).pitch - target_pitch
@@ -357,14 +357,14 @@ while True:  # 再入制导
         err_pitch = 0
         err_e = 0
         err_i = 0
-    else:
+    else:  # 末制导
         err_e = v_angle - start_angle * D / terminal_dist - 1
         err_i = (-vessel.angular_velocity(target_frame)[1] * 180 / math.pi) - limit(target_angle_pid.update(err_e, dt),
                                                                                     -5, 5)
         ctrl.pitch = pitch_rate_pid.update(err_i, dt)  # 末端法向导引
-        igni_h = vessel.flight(srf_frame).speed ** 2 / (2 * (acc * factor - g))
+        igni_h = vessel.flight(srf_frame).speed ** 2 / (2 * (acc * factor - g))  # 预计点火高度
         igni_angle = math.asin(limit(horizontal_speed ** 2 / (2 * D * math.cos(
-            (target_dir - retrograde) / 180 * math.pi) * 0.75 * acc), -1, 1)) / math.pi * 180
+            (target_dir - retrograde) / 180 * math.pi) * 0.75 * acc), -1, 1)) / math.pi * 180  # 预计点火角度
         output(True, err_heading, err_pitch, err_roll, v_angle, terminal, err_e, err_i)
         if vessel.position(target_frame)[0] < igni_h or igni_angle > 45:
             break
@@ -372,7 +372,7 @@ while True:  # 再入制导
 # 动力着陆阶段
 landing = True
 ctrl.throttle = ref_throttle
-speed_pid = PID(kp=0.1, ki=0, kd=0)
+speed_pid = PID(kp=0.1, ki=0, kd=0)  # 垂直速度PID
 heading_pid = PID(kp=-0.05, ki=0, kd=-0.02)
 yaw_correct_pid = PID(kp=0.5, ki=0, kd=0.2)
 yaw_pid = PID(kp=0.03, ki=0, kd=0.01)
@@ -381,7 +381,7 @@ roll_pid = PID(kp=-0.005, ki=0, kd=-0.015)
 ut = conn.space_center.ut
 target_roll = 90
 err_lateral = 0
-cur_pos = vessel.position(target_frame)
+cur_pos = vessel.position(target_frame)  # 当前位置
 while target_frame_velocity()[0] < -0.5 and cur_pos[0] > 0.5:  # 动力着陆制导
     pre_pos = cur_pos
     sleep(0.02)
@@ -390,19 +390,19 @@ while target_frame_velocity()[0] < -0.5 and cur_pos[0] > 0.5:  # 动力着陆制
         continue
     ut = conn.space_center.ut
     cur_pos = vessel.position(target_frame)
-    H = cur_pos[0]
-    D = math.sqrt(cur_pos[1] ** 2 + cur_pos[2] ** 2)
-    ds = math.sqrt((pre_pos[1] - cur_pos[1]) ** 2 + (pre_pos[2] - cur_pos[2]) ** 2)
-    horizontal_speed = math.sqrt(target_frame_velocity()[1] ** 2 + target_frame_velocity()[2] ** 2)
+    H = cur_pos[0]  # 当前高度
+    D = math.sqrt(cur_pos[1] ** 2 + cur_pos[2] ** 2)  # 水平距离
+    ds = math.sqrt((pre_pos[1] - cur_pos[1]) ** 2 + (pre_pos[2] - cur_pos[2]) ** 2)  # 与上一时刻水平位移
+    horizontal_speed = math.sqrt(target_frame_velocity()[1] ** 2 + target_frame_velocity()[2] ** 2)  # 水平速度
     retrograde = math.acos(limit((pre_pos[1] - cur_pos[1]) / ds, -1, 1)) / math.pi * 180  # 速度反向
     pos_dir = math.acos(limit(cur_pos[1] / D, -1, 1)) / math.pi * 180  # 目标位置航向
     acc = vessel.available_thrust / vessel.mass
-    err_lateral = math.sin((retrograde - pos_dir) / 180 * math.pi) * D
-    if conn.space_center.transform_direction((0, 100, 0), vessel_frame, target_frame)[2] < 0:
+    err_lateral = math.sin((retrograde - pos_dir) / 180 * math.pi) * D  # 预测横向误差
+    if conn.space_center.transform_direction((0, 100, 0), vessel_frame, target_frame)[2] < 0:  # 重定义俯仰角
         pitch = 180 - vessel.flight(target_frame).pitch
     else:
         pitch = vessel.flight(target_frame).pitch
-    if not gear_flag and H < 500:
+    if not gear_flag and H < 350:  # 展开着陆腿
         gear_flag = True
         ctrl.gear = True
     err_roll = target_roll - roll_angle()
@@ -419,7 +419,7 @@ while target_frame_velocity()[0] < -0.5 and cur_pos[0] > 0.5:  # 动力着陆制
         else:
             err_heading = vessel.flight(target_frame).heading - target_heading
             ctrl.yaw = heading_pid.update(err_heading, dt)
-    else:
+    else:  # 接地前修正
         if abs(vessel_vel_2D()[1]) < 1:
             target_pitch = 90
         else:
@@ -432,7 +432,7 @@ while target_frame_velocity()[0] < -0.5 and cur_pos[0] > 0.5:  # 动力着陆制
         ctrl.yaw = yaw_pid.update(err_yaw, dt)
     err_pitch = pitch - target_pitch
     ctrl.pitch = pitch_pid.update(err_pitch, dt)
-    target_speed = math.sqrt(H * 2 * (acc * ref_throttle - g))
+    target_speed = math.sqrt(H * 2 * (acc * ref_throttle - g))  # 垂直速度控制
     err_speed = -target_frame_velocity()[0] - target_speed + 1
     ctrl.throttle = limit(speed_pid.update(err_speed, dt) + ref_throttle, 0.75, 1)
     output(True, err_heading, err_pitch, 0, 0, terminal, 0, 0, landing, err_lateral, target_heading, err_speed)
