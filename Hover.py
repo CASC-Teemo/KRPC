@@ -228,14 +228,14 @@ class PID:
 
 
 ctrl.throttle = ref_throttle
-throttle_pid = PID(kp=0.1, ki=0, kd=0.1)
+throttle_pid = PID(kp=0.1, ki=0.1, kd=0.2, integral_limit=1)
 east_speed_pid = PID(kp=2, ki=0, kd=0)
 north_speed_pid = PID(kp=2, ki=0, kd=0)
-pitch_pid = PID(kp=0.05, ki=0, kd=0.2)
+pitch_pid = PID(kp=0.05, ki=0, kd=0.15)
 yaw_pid = PID(kp=0.05, ki=0, kd=0.2)
 roll_pid = PID(kp=-0.01, ki=0, kd=-0.02)
 ut = conn.space_center.ut
-target_pos = (10, 0, 0)
+target_pos = (1, 0, 0)
 target_pitch = 90
 target_yaw = 0
 target_roll = 90
