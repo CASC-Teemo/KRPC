@@ -337,9 +337,9 @@ while True:  # 再入制导
         vessel.position(target_frame)[1] + bias * vessel.position(target_frame)[1] / D,
         vessel.position(target_frame)[2] + bias * vessel.position(target_frame)[2] / D)  # 着陆点
     target_dir = math.acos((vessel.position(target_frame)[1] - 30) / D) * 180 / math.pi  # 目标方向
-    target_heading = target_dir + (target_dir - 90) * K  # 航向偏置导引
+    target_heading = target_dir + limit((target_dir - 90) * K, -5, 5)  # 航向偏置导引
     if D > 2000:
-        target_roll = (90 - vessel.flight(target_frame).heading) * K
+        target_roll = limit((target_dir - target_heading) * K, -15, 15)
     else:  # 水平距离过小时锁定滚转
         target_roll = 0
     err_heading = vessel.flight(target_frame).heading - target_heading
