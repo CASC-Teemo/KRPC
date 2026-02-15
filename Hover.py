@@ -117,21 +117,23 @@ def vectors_angle(u, v):
     return math.acos(dp / (um * vm)) * (180 / math.pi)
 
 
+# 箭体垂直时俯仰角，垂直向上为90，偏东逐渐减小
+def pitch_angle():
+    v_up = (0, 1, 0)  # 本体系箭体指向
+    v_up_t = conn.space_center.transform_direction(v_up, vessel_frame, target_frame)  # 使用着陆点坐标系表示箭体指向
+    angle = math.acos(limit(v_up_t[2] / (math.sqrt(v_up_t[0] ** 2 + v_up_t[2] ** 2)), -1, 1)) / math.pi * 180
+    return angle
+
+
 # 箭体垂直时偏航角，垂直向上时为0，偏南(本体系向右)为正
 def yaw_angle():
-    t_up = (1, 0, 0)  # 着陆点坐标系天顶方向
-    v_forward = (0, 1, 0)  # 本体系前方
-    t_up_v = conn.space_center.transform_direction(t_up, target_frame, vessel_frame)
-    proj_xoy = (t_up_v[0], t_up_v[1], 0)
-    angle = vectors_angle(proj_xoy, v_forward)
-    cross = cross_product(v_forward, proj_xoy)
-    if cross[2] < 0:
-        return -angle
-    else:
-        return angle
+    v_up = (0, 1, 0)  # 本体系箭体指向
+    v_up_t = conn.space_center.transform_direction(v_up, vessel_frame, target_frame)  # 使用着陆点坐标系表示箭体指向
+    angle = math.acos(limit(v_up_t[1] / (math.sqrt(v_up_t[0] ** 2 + v_up_t[1] ** 2)), -1, 1)) / math.pi * 180
+    return angle - 90
 
 
-# 箭体垂直时滚转角，本体系下方向东为90°(基准)，向北为0°
+# 箭体垂直时滚转角，本体系下方向东为90(基准)，向北为0
 def roll_angle():
     t_east = (0, 0, 1)
     v_right = (1, 0, 0)
@@ -245,14 +247,10 @@ while True:
     if dt < 0.005:
         continue
     ut = conn.space_center.ut
-    if conn.space_center.transform_direction((0, 100, 0), vessel_frame, target_frame)[2] < 0:
-        pitch = 180 - vessel.flight(target_frame).pitch
-    else:
-        pitch = vessel.flight(target_frame).pitch
     target_east_speed = limit((target_pos[2] - vessel.position(target_frame)[2]) / 2, -5, 5)
     err_east_speed = target_frame_velocity()[2] - target_east_speed
     target_pitch = limit(east_speed_pid.update(err_east_speed, dt), -15, 15) + 90
-    err_pitch = target_pitch - pitch
+    err_pitch = target_pitch - pitch_angle()
     ctrl.pitch = pitch_pid.update(err_pitch, dt)
     target_north_speed = limit((target_pos[1] - vessel.position(target_frame)[1]) / 2, -5, 5)
     err_north_speed = target_frame_velocity()[1] - target_north_speed
