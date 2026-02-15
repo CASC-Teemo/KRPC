@@ -118,35 +118,23 @@ def vectors_angle(u, v):
     return math.acos(dp / (um * vm)) * (180 / math.pi)
 
 
-# 箭体垂直时俯仰角，垂直向上为90°，偏东逐渐减小
+# 箭体垂直时俯仰角，垂直向上为90，偏东逐渐减小
 def pitch_angle():
-    t_up = (1, 0, 0)  # 着陆点坐标系天顶方向
-    t_up_v = conn.space_center.transform_direction(t_up, target_frame, vessel_frame)  # 使用本体系表示着陆点坐标系天顶方向
-    v_right = (1, 0, 0)  # 本体系右方
-    v_down = (0, 0, 1)  # 本体系下方
-    pitch_hor = cross_product(v_right, t_up_v)
-    angle = vectors_angle(pitch_hor, v_down)
-    if pitch_hor[1] < 0:
-        return angle + 90
-    else:
-        return -angle + 90
+    v_up = (0, 1, 0)  # 本体系箭体指向
+    v_up_t = conn.space_center.transform_direction(v_up, vessel_frame, target_frame)  # 使用着陆点坐标系表示箭体指向
+    angle = math.acos(limit(v_up_t[2] / (math.sqrt(v_up_t[0] ** 2 + v_up_t[2] ** 2)), -1, 1)) / math.pi * 180
+    return angle
 
 
 # 箭体垂直时偏航角，垂直向上时为0，偏南(本体系向右)为正
 def yaw_angle():
-    t_up = (1, 0, 0)  # 着陆点坐标系天顶方向
-    v_forward = (0, 1, 0)  # 本体系前方
-    t_up_v = conn.space_center.transform_direction(t_up, target_frame, vessel_frame)
-    proj_xoy = (t_up_v[0], t_up_v[1], 0)
-    angle = vectors_angle(proj_xoy, v_forward)
-    cross = cross_product(v_forward, proj_xoy)
-    if cross[2] < 0:
-        return -angle
-    else:
-        return angle
+    v_up = (0, 1, 0)  # 本体系箭体指向
+    v_up_t = conn.space_center.transform_direction(v_up, vessel_frame, target_frame)  # 使用着陆点坐标系表示箭体指向
+    angle = math.acos(limit(v_up_t[1] / (math.sqrt(v_up_t[0] ** 2 + v_up_t[1] ** 2)), -1, 1)) / math.pi * 180
+    return angle - 90
 
 
-# 箭体垂直时滚转角，本体系下方向东为90°(基准)，向北为0°
+# 箭体垂直时滚转角，本体系下方向东为90(基准)，向北为0
 def roll_angle():
     t_east = (0, 0, 1)
     v_right = (1, 0, 0)
@@ -400,10 +388,6 @@ while target_frame_velocity()[0] < -0.5 and cur_pos[0] > 0.5:  # 动力着陆制
     pos_dir = math.acos(limit(cur_pos[1] / D, -1, 1)) / math.pi * 180  # 目标位置航向
     acc = vessel.available_thrust / vessel.mass
     err_lateral = math.sin((retrograde - pos_dir) / 180 * math.pi) * D  # 预测横向误差
-    if conn.space_center.transform_direction((0, 100, 0), vessel_frame, target_frame)[2] < 0:  # 重定义俯仰角
-        pitch = 180 - vessel.flight(target_frame).pitch
-    else:
-        pitch = vessel.flight(target_frame).pitch
     if not gear_flag and H < 300:  # 展开着陆腿
         gear_flag = True
         ctrl.gear = True
@@ -432,7 +416,7 @@ while target_frame_velocity()[0] < -0.5 and cur_pos[0] > 0.5:  # 动力着陆制
             target_yaw = limit(vessel_vel_2D()[0] * 5, -5, 5)
         err_yaw = target_yaw - yaw_angle()
         ctrl.yaw = yaw_pid.update(err_yaw, dt)
-    err_pitch = pitch - target_pitch
+    err_pitch = pitch_angle() - target_pitch
     ctrl.pitch = pitch_pid.update(err_pitch, dt)
     target_speed = math.sqrt(H * 2 * (acc * ref_throttle - g))  # 垂直速度控制
     err_speed = -target_frame_velocity()[0] - target_speed + 1
